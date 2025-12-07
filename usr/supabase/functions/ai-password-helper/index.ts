@@ -1,26 +1,35 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY')
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
 
 serve(async (req) => {
-  if (!OPENAI_API_KEY) {
-    return new Response(
-      JSON.stringify({ error: 'OpenAI API key not configured' }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const { action, prompt } = await req.json()
+    const OPENAI_API_KEY = Deno.env.get('EXTERNAL_API_KEY')
+    if (!OPENAI_API_KEY) {
+      throw new Error('OpenAI API Key not configured')
+    }
 
-    let systemPrompt = "You are a helpful security assistant."
-    let userPrompt = prompt
+    const { action, payload } = await req.json()
+
+    let systemMessage = ''
+    let userMessage = ''
 
     if (action === 'generate_password') {
-      systemPrompt = "You are a password generator. Generate a strong, secure password based on the user's requirements. Return ONLY the password string, no other text."
-      userPrompt = prompt || "Generate a strong password with 12 characters, including numbers and symbols."
-    } else if (action === 'analyze_strength') {
-      systemPrompt = "You are a security expert. Analyze the strength of the provided password. Return a JSON object with 'score' (1-10) and 'feedback' (string)."
+      systemMessage = 'You are a secure password generator. Generate a strong, random password. Return ONLY the password string, no other text or explanations.'
+      userMessage = payload || 'Generate a complex password with 16 characters including symbols.'
+    } else if (action === 'analyze_password') {
+      systemMessage = 'You are a cybersecurity expert. Analyze the strength of the provided password. Give a short, concise assessment (Weak, Medium, Strong) and one specific tip for improvement if needed.'
+      userMessage = `Analyze this password: ${payload}`
+    } else {
+      throw new Error('Invalid action')
     }
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -32,31 +41,29 @@ serve(async (req) => {
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
+          { role: 'system', content: systemMessage },
+          { role: 'user', content: userMessage }
         ],
+        temperature: 0.7,
       }),
     })
 
     const data = await response.json()
     
     if (data.error) {
-       return new Response(JSON.stringify({ error: data.error.message }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      throw new Error(data.error.message)
     }
 
-    const result = data.choices[0].message.content
+    const result = data.choices[0].message.content.trim()
 
-    return new Response(
-      JSON.stringify({ result }),
-      { headers: { 'Content-Type': 'application/json' } }
-    )
+    return new Response(JSON.stringify({ result }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+
   } catch (error) {
-    return new Response(
-      JSON.stringify({ error: error.message }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    )
+    return new Response(JSON.stringify({ error: error.message }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
   }
 })
