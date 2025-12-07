@@ -1,48 +1,51 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const OPENAI_API_KEY = Deno.env.get('EXTERNAL_API_KEY')
-    if (!OPENAI_API_KEY) {
-      throw new Error('OpenAI API Key not configured')
+    const { action, prompt, password } = await req.json()
+    const apiKey = Deno.env.get('OPENAI_API_KEY')
+
+    if (!apiKey) {
+      throw new Error('Missing OpenAI API Key')
     }
 
-    const { action, payload } = await req.json()
+    let systemPrompt = "You are a helpful security assistant."
+    let userPrompt = ""
 
-    let systemMessage = ''
-    let userMessage = ''
-
-    if (action === 'generate_password') {
-      systemMessage = 'You are a secure password generator. Generate a strong, random password. Return ONLY the password string, no other text or explanations.'
-      userMessage = payload || 'Generate a complex password with 16 characters including symbols.'
-    } else if (action === 'analyze_password') {
-      systemMessage = 'You are a cybersecurity expert. Analyze the strength of the provided password. Give a short, concise assessment (Weak, Medium, Strong) and one specific tip for improvement if needed.'
-      userMessage = `Analyze this password: ${payload}`
+    if (action === 'generate') {
+      systemPrompt = "You are a password generator. Return ONLY the generated password without any markdown formatting or explanation."
+      userPrompt = prompt || "Generate a strong, complex password with 16 characters including symbols, numbers, and mixed case letters."
+    } else if (action === 'analyze') {
+      systemPrompt = "You are a security expert. Analyze this password and provide a JSON response with two fields: 'strength' (Weak, Medium, Strong) and 'tip' (a brief suggestion). Do not use markdown."
+      userPrompt = `Analyze this password: "${password}"`
     } else {
-      throw new Error('Invalid action')
+      return new Response(
+        JSON.stringify({ error: 'Invalid action. Use "generate" or "analyze".' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+      )
     }
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+        'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         model: 'gpt-4o',
         messages: [
-          { role: 'system', content: systemMessage },
-          { role: 'user', content: userMessage }
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
         ],
         temperature: 0.7,
       }),
@@ -56,14 +59,14 @@ serve(async (req) => {
 
     const result = data.choices[0].message.content.trim()
 
-    return new Response(JSON.stringify({ result }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-
+    return new Response(
+      JSON.stringify({ result }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    )
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+    )
   }
 })
