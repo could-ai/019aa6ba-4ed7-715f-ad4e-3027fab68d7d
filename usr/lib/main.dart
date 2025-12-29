@@ -15,6 +15,12 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
+        // Setting background to light blue as requested (interpreting "Beijing" as "Background")
+        scaffoldBackgroundColor: Colors.blue.shade50,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+        ),
         useMaterial3: true,
       ),
       initialRoute: '/',
